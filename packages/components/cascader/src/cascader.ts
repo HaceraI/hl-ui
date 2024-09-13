@@ -26,6 +26,10 @@ export const cascaderProps = buildProps({
    */
   disabled: Boolean,
   /**
+   * @description whether Cascader is in loading state
+   */
+  loading: Boolean,
+  /**
    * @description whether selected value can be cleared
    */
   clearable: Boolean,

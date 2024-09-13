@@ -43,8 +43,18 @@
           @input="handleInput"
         >
           <template #suffix>
+            <template v-if="isLoading">
+              <slot v-if="$slots.loading" name="loading" />
+              <el-icon
+                v-else
+                key="loading"
+                :class="[nsInput.e('icon'), nsInput.is('loading')]"
+              >
+                <loading />
+              </el-icon>
+            </template>
             <el-icon
-              v-if="clearBtnVisible"
+              v-else-if="clearBtnVisible"
               key="clear"
               :class="[nsInput.e('icon'), 'icon-circle-close']"
               @click.stop="handleClear"
@@ -219,7 +229,7 @@ import {
   EVENT_CODE,
   UPDATE_MODEL_EVENT,
 } from '@element-plus/constants'
-import { ArrowDown, Check, CircleClose } from '@element-plus/icons-vue'
+import { ArrowDown, Check, CircleClose, Loading } from '@element-plus/icons-vue'
 import { cascaderEmits, cascaderProps } from './cascader'
 
 import type { Options } from '@element-plus/components/popper'
@@ -294,7 +304,10 @@ const cascaderStyle = computed<StyleValue>(() => {
   return attrs.style as StyleValue
 })
 
-const isDisabled = computed(() => props.disabled || form?.disabled)
+const isLoading = computed(() => props.loading)
+const isDisabled = computed(
+  () => props.disabled || props.loading || form?.disabled
+)
 const inputPlaceholder = computed(
   () => props.placeholder || t('el.cascader.placeholder')
 )
