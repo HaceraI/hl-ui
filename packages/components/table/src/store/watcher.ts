@@ -1,7 +1,6 @@
 // @ts-nocheck
-import { getCurrentInstance, ref, toRefs, unref, watch } from 'vue'
-import { isEqual } from 'lodash-unified'
-import { hasOwn } from '@element-plus/utils'
+import { computed, getCurrentInstance, ref, toRefs, unref, watch } from 'vue'
+import { hasOwn, isArray, isString } from '@element-plus/utils'
 import {
   getColumnById,
   getColumnByKey,
@@ -21,7 +20,7 @@ import type { StoreFilter } from '.'
 
 const sortData = (data, states) => {
   const sortingColumn = states.sortingColumn
-  if (!sortingColumn || typeof sortingColumn.sortable === 'string') {
+  if (!sortingColumn || isString(sortingColumn.sortable)) {
     return data
   }
   return orderBy(
@@ -77,9 +76,25 @@ function useWatcher<T>() {
   const sortOrder = ref(null)
   const hoverRow = ref(null)
 
-  watch(data, () => instance.state && scheduleLayout(false), {
-    deep: true,
+  const selectedMap = computed(() => {
+    return rowKey.value ? getKeysMap(selection.value, rowKey.value) : undefined
   })
+
+  watch(
+    data,
+    () => {
+      if (instance.state) {
+        scheduleLayout(false)
+        const needUpdateFixed = instance.props.tableLayout === 'auto'
+        if (needUpdateFixed) {
+          instance.refs.tableHeaderRef?.updateFixedColumnStyle()
+        }
+      }
+    },
+    {
+      deep: true,
+    }
+  )
 
   // 检查 rowKey 是否存在
   const assertRowKey = () => {
@@ -100,22 +115,30 @@ function useWatcher<T>() {
       updateChildFixed(column)
     })
     fixedColumns.value = _columns.value.filter(
-      (column) => column.fixed === true || column.fixed === 'left'
+      (column) =>
+        column.type !== 'selection' && [true, 'left'].includes(column.fixed)
     )
+
+    let selectColFixLeft
+    if (_columns.value?.[0]?.type === 'selection') {
+      const selectColumn = _columns.value[0]
+      selectColFixLeft =
+        [true, 'left'].includes(selectColumn.fixed) ||
+        (fixedColumns.value.length && selectColumn.fixed !== 'right')
+      if (selectColFixLeft) {
+        fixedColumns.value.unshift(selectColumn)
+      }
+    }
+
     rightFixedColumns.value = _columns.value.filter(
       (column) => column.fixed === 'right'
     )
-    if (
-      fixedColumns.value.length > 0 &&
-      _columns.value[0] &&
-      _columns.value[0].type === 'selection' &&
-      !_columns.value[0].fixed
-    ) {
-      _columns.value[0].fixed = true
-      fixedColumns.value.unshift(_columns.value[0])
-    }
 
-    const notFixedColumns = _columns.value.filter((column) => !column.fixed)
+    const notFixedColumns = _columns.value.filter(
+      (column) =>
+        (selectColFixLeft ? column.type !== 'selection' : true) && !column.fixed
+    )
+
     originColumns.value = []
       .concat(fixedColumns.value)
       .concat(notFixedColumns)
@@ -149,8 +172,12 @@ function useWatcher<T>() {
   }
 
   // 选择
-  const isSelected = (row) => {
-    return selection.value.some((item) => isEqual(item, row))
+  const isSelected = (row: DefaultRow) => {
+    if (selectedMap.value) {
+      return !!selectedMap.value[getRowIdentity(row, rowKey.value)]
+    } else {
+      return selection.value.includes(row)
+    }
   }
 
   const clearSelection = () => {
@@ -166,11 +193,10 @@ function useWatcher<T>() {
     let deleted
     if (rowKey.value) {
       deleted = []
-      const selectedMap = getKeysMap(selection.value, rowKey.value)
       const dataMap = getKeysMap(data.value, rowKey.value)
-      for (const key in selectedMap) {
-        if (hasOwn(selectedMap, key) && !dataMap[key]) {
-          deleted.push(selectedMap[key].row)
+      for (const key in selectedMap.value) {
+        if (hasOwn(selectedMap.value, key) && !dataMap[key]) {
+          deleted.push(selectedMap.value[key].row)
         }
       }
     } else {
@@ -192,13 +218,21 @@ function useWatcher<T>() {
   const toggleRowSelection = (
     row: T,
     selected?: boolean,
-    emitChange = true
+    emitChange = true,
+    ignoreSelectable = false
   ) => {
     const treeProps = {
       children: instance?.store?.states?.childrenColumnName.value,
       checkStrictly: instance?.store?.states?.checkStrictly.value,
     }
-    const changed = toggleRowStatus(selection.value, row, selected, treeProps)
+    const changed = toggleRowStatus(
+      selection.value,
+      row,
+      selected,
+      treeProps,
+      ignoreSelectable ? undefined : selectable.value,
+      data.value.indexOf(row)
+    )
     if (changed) {
       const newSelection = (selection.value || []).slice()
       // 调用 API 修改选中值，不触发 select 事件
@@ -253,10 +287,9 @@ function useWatcher<T>() {
   }
 
   const updateSelectionByRowKey = () => {
-    const selectedMap = getKeysMap(selection.value, rowKey.value)
     data.value.forEach((row) => {
       const rowId = getRowIdentity(row, rowKey.value)
-      const rowInfo = selectedMap[rowId]
+      const rowInfo = selectedMap.value![rowId]
       if (rowInfo) {
         selection.value[rowInfo.index] = row
       }
@@ -271,20 +304,9 @@ function useWatcher<T>() {
     }
 
     const { childrenColumnName } = instance.store.states
-    const selectedMap = rowKey.value
-      ? getKeysMap(selection.value, rowKey.value)
-      : undefined
-
     let rowIndex = 0
     let selectedCount = 0
 
-    const isSelected = (row: DefaultRow) => {
-      if (selectedMap) {
-        return !!selectedMap[getRowIdentity(row, rowKey.value)]
-      } else {
-        return selection.value.includes(row)
-      }
-    }
     const checkSelectedStatus = (data: DefaultRow[]) => {
       for (const row of data) {
         const isRowSelectable =
@@ -329,7 +351,7 @@ function useWatcher<T>() {
 
   // 过滤与排序
   const updateFilters = (columns, values) => {
-    if (!Array.isArray(columns)) {
+    if (!isArray(columns)) {
       columns = [columns]
     }
     const filters_ = {}
@@ -396,11 +418,11 @@ function useWatcher<T>() {
     const keys = Object.keys(panels)
     if (!keys.length) return
 
-    if (typeof columnKeys === 'string') {
+    if (isString(columnKeys)) {
       columnKeys = [columnKeys]
     }
 
-    if (Array.isArray(columnKeys)) {
+    if (isArray(columnKeys)) {
       const columns_ = columnKeys.map((key) =>
         getColumnByKey(
           {
@@ -460,6 +482,7 @@ function useWatcher<T>() {
     updateTreeExpandKeys,
     toggleTreeExpansion,
     updateTreeData,
+    updateKeyChildren,
     loadOrToggle,
     states: treeStates,
   } = useTree({
@@ -522,6 +545,7 @@ function useWatcher<T>() {
     updateCurrentRowData,
     loadOrToggle,
     updateTreeData,
+    updateKeyChildren,
     states: {
       tableSize,
       rowKey,

@@ -16,10 +16,12 @@
     );
   }
 
+  @include when(disabled) {
+    pointer-events: none;
+  }
 }
 
 @include b(mention-dropdown) {
-
   @include set-component-css-var('mention', $mention);
 
   @include e(item) {
